@@ -26,8 +26,10 @@ apps:
     slots: [multipass]
     plugs:
       - firewall-control
+      - home
       - kvm
       - libvirt
+      - multipass-support
       - network
       - network-control
       - network-manager
@@ -44,7 +46,8 @@ apps:
     command: bin/multipass
     completer: etc/bash_completion.d/snap.multipass
     plugs:
-      - multipass-plug
+      - multipass-support
+      - network
 
   libvirt-bin:
     command: bin/launch-libvirtd
@@ -55,6 +58,7 @@ apps:
     daemon: simple
     plugs:
       - libvirt
+      - network
 
   virsh:
     command: bin/virsh
@@ -63,10 +67,12 @@ apps:
       LC_ALL: C
     plugs:
       - libvirt
+      - network
 
-plugs:
-  multipass-plug: # because cannot have identical plug/slot name in same yaml.
-    interface: multipass
+#plugs:
+#  home-plug: # to allow multipass mount local directory into VM - no is still READ ONLY
+#    interface: home
+#    read: all
 
 parts:
   qtbase5-dev:
@@ -173,7 +179,7 @@ parts:
     plugin: cmake
     build-packages:
     - build-essential
-    - try: cmake-extras
+    - try: [cmake-extras]
     - golang
     - libsystemd-dev
     source: .

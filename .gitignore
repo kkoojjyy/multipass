@@ -5,3 +5,8 @@ CMakeLists.txt.user
 # only care about the encrypted file
 /tools/bot-data/*
 /tools/bot-data.tar.xz
+
+#Ignore snap build artifacts
+parts
+prime
+stage
