@@ -26,6 +26,8 @@
 #include <multipass/ssh/ssh_session.h>
 #include <multipass/sshfs_mount/sftp_server.h>
 
+#include <QDateTime>
+
 #include <fmt/format.h>
 #include <gmock/gmock.h>
 
@@ -763,6 +765,69 @@ TEST_F(SftpServer, handles_readdir)
 
     std::vector<std::string> expected_entries = {".", "..", "test-dir-entry", "test-file"};
     EXPECT_THAT(entries, ContainerEq(expected_entries));
+}
+
+TEST_F(SftpServer, handles_readdir_attributes_preserved)
+{
+    mpt::TempDir temp_dir;
+    QDir dir_entry(temp_dir.path());
+
+    auto test_file = temp_dir.path() + "/test-file";
+    mpt::make_file_with_content(test_file, "some content for the file to give it non-zero size");
+
+    QFileDevice::Permissions expected_permissions = QFileDevice::WriteOwner | QFileDevice::ExeGroup | QFileDevice::ReadOther;
+    QFile::setPermissions(test_file, expected_permissions);
+
+    auto sftp = make_sftpserver(temp_dir.path().toStdString());
+    auto open_dir_msg = make_msg(SFTP_OPENDIR);
+    auto dir_name = name_as_char_array(temp_dir.path().toStdString());
+    open_dir_msg->filename = dir_name.data();
+
+    auto readdir_msg = make_msg(SFTP_READDIR);
+    auto readdir_msg_final = make_msg(SFTP_READDIR);
+
+    void* id{nullptr};
+    auto handle_alloc = [&id](sftp_session, void* info) {
+        id = info;
+        return nullptr;
+    };
+
+    int eof_num_calls{0};
+    auto reply_status = make_reply_status(readdir_msg_final.get(), SSH_FX_EOF, eof_num_calls);
+
+    auto test_file_attrs = new sftp_attributes_struct;
+
+    auto get_test_file_attributes = [&test_file_attrs](sftp_client_message msg, const char* file, const char* longname,
+                                               sftp_attributes attr) {
+        if (strcmp(file, ".") != 0 && strcmp(file, "..") != 0)
+        {
+            memcpy(test_file_attrs, attr, sizeof(sftp_attributes_struct));
+        }
+        return SSH_OK;
+    };
+
+    REPLACE(sftp_reply_handle, [](auto...) { return SSH_OK; });
+    REPLACE(sftp_handle_alloc, handle_alloc);
+    REPLACE(sftp_handle, [&id](auto...) { return id; });
+    REPLACE(sftp_get_client_message, make_msg_handler());
+    REPLACE(sftp_reply_status, reply_status);
+    REPLACE(sftp_reply_names_add, get_test_file_attributes);
+    REPLACE(sftp_reply_names, [](auto...) { return SSH_OK; });
+
+    sftp.run();
+
+    EXPECT_THAT(eof_num_calls, Eq(1));
+
+    QFileInfo test_file_info(test_file);
+    EXPECT_EQ(test_file_attrs->size, (uint64_t)test_file_info.size());
+    EXPECT_EQ(test_file_attrs->gid, test_file_info.groupId());
+    EXPECT_EQ(test_file_attrs->uid, test_file_info.ownerId());
+    EXPECT_EQ(test_file_attrs->atime, (uint32_t) test_file_info.lastModified().toSecsSinceEpoch()); // atime64 is zero, expected?
+
+    // Comparing file permissions, sftp uses octal format, QFileInfo uses hex format.
+    EXPECT_EQ(test_file_attrs->permissions & 07, test_file_info.permissions() & 0x7);
+    EXPECT_EQ((test_file_attrs->permissions & 070) >> 3, (test_file_info.permissions() & 0x70) >> 4);
+    EXPECT_EQ((test_file_attrs->permissions & 0700) >> 6, (test_file_info.permissions() & 0x700) >> 8);
 }
 
 TEST_F(SftpServer, handles_close)
