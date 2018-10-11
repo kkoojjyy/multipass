@@ -799,7 +799,7 @@ TEST_F(SftpServer, handles_readdir_attributes_preserved)
 
     auto get_test_file_attributes = [&test_file_attrs](sftp_client_message msg, const char* file, const char* longname,
                                                sftp_attributes attr) {
-        if (strcmp(file, ".") != 0 && strcmp(file, "..") != 0)
+        if (strcmp(file, "test-file") == 0)
         {
             memcpy(test_file_attrs, attr, sizeof(sftp_attributes_struct));
         }
